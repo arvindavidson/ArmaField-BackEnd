@@ -16,7 +16,7 @@ FROM base AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 
-RUN apk add --no-cache postgresql-client
+RUN apk add --no-cache postgresql-client curl
 
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
@@ -39,5 +39,8 @@ USER nextjs
 EXPOSE 3000
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
+
+HEALTHCHECK --start-period=120s --interval=30s --timeout=10s --retries=5 \
+  CMD curl --fail --silent http://localhost:3000/api/health || exit 1
 
 CMD ["sh", "-c", "npx prisma migrate deploy && node server.js"]
