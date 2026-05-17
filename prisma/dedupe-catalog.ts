@@ -25,6 +25,17 @@ function stripModTag(name: string): string {
   return name.replace(/\s*\[(RHS|WCS)\]\s*$/, "").trim();
 }
 
+// Aggressive grouping key — collapses parenthesized variants like (RHSMag),
+// (M203), (camo), (FDE), (PlumMag), (base), (tan) that share an in-game
+// UIInfo display name with the bare prefab.
+function groupingName(name: string): string {
+  return name
+    .replace(/\s*\[(RHS|WCS)\]\s*$/, "")
+    .replace(/\s*\((RHSMag|PlumMag|base|M203|camo|tan|FDE)\)\s*/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 async function main() {
   const all = await prisma.weapon.findMany({
     select: { id: true, guid: true, name: true, class: true, type: true, isDefault: true },
@@ -32,10 +43,11 @@ async function main() {
   });
   console.log(`Loaded ${all.length} weapon rows.`);
 
-  // Group by (stripped name, class)
+  // Group by (in-game grouping name, class). The grouping key collapses
+  // parenthesized variants that share their parent prefab's UIInfo display.
   const groups = new Map<string, typeof all>();
   for (const w of all) {
-    const key = `${stripModTag(w.name)}|${w.class}`;
+    const key = `${groupingName(w.name)}|${w.class}`;
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key)!.push(w);
   }
@@ -46,9 +58,9 @@ async function main() {
 
   for (const [key, group] of groups) {
     if (group.length < 2) {
-      // Singletons: still strip the [RHS]/[WCS] tag from their name
+      // Singletons: still strip mod tag + variant suffix from the name
       const w = group[0];
-      const clean = stripModTag(w.name);
+      const clean = groupingName(w.name);
       if (clean !== w.name) renames.push({ id: w.id, from: w.name, to: clean });
       continue;
     }
@@ -56,16 +68,23 @@ async function main() {
 
     // Pick keeper by rule
     const sorted = [...group].sort((a, b) => {
+      // 1. starter weapons always win
       if (a.isDefault !== b.isDefault) return a.isDefault ? -1 : 1;
+      // 2. prefer "bare" names over parenthesized variants
+      const aParen = /\(/.test(a.name) ? 1 : 0;
+      const bParen = /\(/.test(b.name) ? 1 : 0;
+      if (aParen !== bParen) return aParen - bParen;
+      // 3. prefer WCS over RHS
       const aWcs = /\[WCS\]/.test(a.name) ? 0 : 1; // 0 wins, so WCS = 0
       const bWcs = /\[WCS\]/.test(b.name) ? 0 : 1;
       if (aWcs !== bWcs) return aWcs - bWcs;
+      // 4. deterministic tiebreak
       return a.id < b.id ? -1 : 1;
     });
     const [keeper, ...losersInGroup] = sorted;
 
-    // Always strip the tag from the keeper's name
-    const clean = stripModTag(keeper.name);
+    // Always strip the tag AND parenthesized variant suffix from the keeper's name
+    const clean = groupingName(keeper.name);
     if (clean !== keeper.name) renames.push({ id: keeper.id, from: keeper.name, to: clean });
     for (const l of losersInGroup) {
       losers.push({ id: l.id, guid: l.guid, name: l.name, class: l.class });
