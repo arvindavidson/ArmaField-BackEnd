@@ -103,7 +103,9 @@ async function main() {
       update: {
         name: w.name, type: w.type, categoryId,
         price: w.price ?? 0, zorder: w.zorder ?? 0,
-        isDefault: w.isDefault ?? false,
+        // Only flip isDefault to true if explicitly requested; never overwrite an
+        // existing starter to false. (Bug: earlier import wiped seed starters.)
+        ...(w.isDefault === true ? { isDefault: true } : {}),
       },
       create: {
         guid: w.guid, class: w.class, name: w.name, type: w.type, categoryId,
